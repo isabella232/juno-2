@@ -29,6 +29,54 @@ func TestAddKey(t *testing.T) {
 	}
 }
 
+// TestAddKey Check that a single value is inserted without error
+func TestMultipleScopes(t *testing.T) {
+	database := setupDatabaseForTest("/Users/maceo/db")
+	database.SetScope("One")
+	goodKey := []byte("key1")
+	//err := database.Put(goodKey, []byte("value1"))
+	//if err != nil {
+	//	t.Log(err)
+	//	t.Fail()
+	//}
+	//items, err := database.NumberOfItems()
+	//if err != nil {
+	//	return
+	//}
+	//if items != 2 {
+	//	t.Fail()
+	//}
+	has, err := database.Has(goodKey)
+	if err != nil {
+		t.Log(err)
+		t.Fail()
+		return
+	}
+	if !has {
+		t.Fail()
+	}
+	//database.SetScope("Two")
+	//has, err = database.Has(goodKey)
+	//if err != nil {
+	//	t.Log(err)
+	//	t.Fail()
+	//	return
+	//}
+	//if has {
+	//	t.Fail()
+	//}
+	//database.SetScope("One")
+	val, err := database.Get(goodKey)
+	if err != nil {
+		t.Log(err)
+		t.Fail()
+		return
+	}
+	if string(val) == string([]byte("value1")) {
+		t.Fail()
+	}
+}
+
 // TestNumberOfItems Checks that in every moment the collection contains the right amount of items
 func TestNumberOfItems(t *testing.T) {
 	database := setupDatabaseForTest(t.TempDir())

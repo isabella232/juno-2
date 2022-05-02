@@ -33,8 +33,9 @@ type Databaser interface {
 
 // KeyValueDb represents the middleware for an MDBX key-value store.
 type KeyValueDb struct {
-	env  *mdbx.Env
-	path string
+	env   *mdbx.Env
+	path  string
+	scope string
 }
 
 // New creates a new key-value database.
@@ -66,9 +67,14 @@ func New(path string, flags uint) *KeyValueDb {
 	if err != nil {
 		// notest
 		log.Default.With("Error", err).Info("Failed to open mdbx.Env.")
+		env.Close()
 		return nil
 	}
 	return &KeyValueDb{env: env, path: path}
+}
+
+func (d *KeyValueDb) SetScope(scope string) {
+	d.scope = scope
 }
 
 // Has returns true if the value at the provided key is in the
@@ -76,7 +82,6 @@ func New(path string, flags uint) *KeyValueDb {
 func (d *KeyValueDb) Has(key []byte) (has bool, err error) {
 	val, err := d.getOne(key)
 	if err != nil {
-		log.Default.With("Error", err, "Key", string(key)).Info("Key provided does not exist.")
 		return false, err
 	}
 	return val != nil, nil
@@ -87,7 +92,12 @@ func (d *KeyValueDb) Has(key []byte) (has bool, err error) {
 func (d *KeyValueDb) getOne(key []byte) (val []byte, err error) {
 	var dbi mdbx.DBI
 	if err := d.env.View(func(txn *mdbx.Txn) error {
-		dbi, err = txn.OpenRoot(mdbx.Create)
+		if d.scope == "" {
+			dbi, err = txn.OpenRoot(mdbx.Create)
+		} else {
+			dbi, err = txn.OpenDBISimple(d.scope, mdbx.Create)
+		}
+		defer d.env.CloseDBI(dbi)
 		if err != nil {
 			log.Default.With("Error", err).Info("Failed to open database.")
 			return err
@@ -119,10 +129,24 @@ func (d *KeyValueDb) Get(key []byte) ([]byte, error) {
 
 // Put inserts a key-value pair into the database.
 func (d *KeyValueDb) Put(key, value []byte) error {
+<<<<<<< Updated upstream
 	log.Default.With("Key", string(key)).Info("Putting value at key.")
 	err := d.env.Update(func(txn *mdbx.Txn) error {
 		log.Default.Info("Opening the root database.")
 		dbi, err := txn.OpenRoot(mdbx.Create)
+=======
+	log.Default.With("Key", string(key)).Debug("Putting value at key.")
+	var dbi mdbx.DBI
+	var err error
+	err = d.env.Update(func(txn *mdbx.Txn) error {
+		log.Default.Debug("Opening the root database.")
+		if d.scope == "" {
+			dbi, err = txn.OpenRoot(mdbx.Create)
+		} else {
+			dbi, err = txn.OpenDBISimple(d.scope, mdbx.Create)
+		}
+		defer d.env.CloseDBI(dbi)
+>>>>>>> Stashed changes
 		if err != nil {
 			log.Default.With("Error", err, "Key", string(key)).Info("Unable to open root database.")
 			return err
@@ -160,6 +184,7 @@ func (d *KeyValueDb) NumberOfItems() (uint64, error) {
 		log.Default.With("Error", err).Info("Unable to get stats from env.")
 		return 0, err
 	}
+
 	return stats.Entries, err
 }
 
