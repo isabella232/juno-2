@@ -29,7 +29,11 @@ var (
 	zero *big.Int
 	// ErrInvalid indicates an input value that is not a field element
 	// with p = 2²⁵¹ + 17·2¹⁹² + 1.
-	ErrInvalid = errors.New("invalid argument")
+	ErrInvalid                 = errors.New("invalid argument")
+	lowPartBits                = 248
+	lowPartMask, _             = new(big.Int).SetString("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", 16)
+	nElementBitsHash           int
+	shiftPoint, p0, p1, p2, p3 point
 )
 
 func init() {
@@ -42,6 +46,12 @@ func init() {
 	}
 	curve = weierstrass.Stark()
 	zero = big.NewInt(0)
+	nElementBitsHash = curve.Params().P.BitLen()
+	shiftPoint = points[0]
+	p0 = points[2]
+	p1 = points[2+lowPartBits]
+	p2 = points[2+nElementBitsHash]
+	p3 = points[2+nElementBitsHash+lowPartBits]
 }
 
 // Digest returns a field element that is the result of hashing an input
@@ -82,6 +92,23 @@ func Digest(data ...*big.Int) (*big.Int, error) {
 		}
 	}
 	return pt1.x, nil
+}
+
+func processSingleElement(element *big.Int, p1, p2 point) point {
+	highNibble := new(big.Int).Rsh(element, uint(lowPartBits))
+	lowPart := new(big.Int).And(element, lowPartMask)
+	lx, ly := curve.ScalarMult(p1.x, p1.y, lowPart.Bytes())
+	hx, hy := curve.ScalarMult(p2.x, p2.y, highNibble.Bytes())
+	x, y := curve.Add(lx, ly, hx, hy)
+	return point{x, y}
+}
+
+func FastDigest(x, y *big.Int) *big.Int {
+	a := processSingleElement(x, p0, p1)
+	b := processSingleElement(y, p2, p3)
+	x1, y1 := curve.Add(shiftPoint.x, shiftPoint.y, a.x, a.y)
+	x2, _ := curve.Add(x1, y1, b.x, b.y)
+	return x2
 }
 
 // ArrayDigest returns a field element that is the result of hashing an
