@@ -10,6 +10,7 @@ import (
 	"github.com/NethermindEth/juno/internal/services"
 	base "github.com/NethermindEth/juno/pkg/common"
 	"github.com/NethermindEth/juno/pkg/db"
+	"github.com/NethermindEth/juno/pkg/db/state"
 	"github.com/NethermindEth/juno/pkg/feeder"
 	"github.com/NethermindEth/juno/pkg/trie"
 	"github.com/ethereum/go-ethereum"
@@ -295,7 +296,7 @@ func (s *Synchronizer) l1Sync() error {
 }
 
 // Close closes the client for the Layer 1 Ethereum node
-func (s *Synchronizer) Close(ctx context.Context) {
+func (s *Synchronizer) Close(_ context.Context) {
 	// notest
 	log.Default.Info("Closing Layer 1 Synchronizer")
 	s.ethereumClient.Close()
@@ -456,6 +457,7 @@ func (s *Synchronizer) updateState(update StateDiff, stateRoot, blockHash, block
 		Info("Got State commitment")
 
 	s.updateAbiAndCode(update, blockHash, blockNumber)
+	s.updateContractStorage(update, blockNumber)
 	return nil
 }
 
@@ -580,11 +582,23 @@ func (s *Synchronizer) updateAbiAndCode(update StateDiff, blockHash, blockNumber
 			With("ContractInfo Address", v.Address, "Block Hash", blockHash, "Block Number", blockNumber).
 			Info("Fetched code and ABI")
 		// Save the ABI
-		abiService := services.GetABIService()
-		abiService.StoreABI(remove0x(v.Address), *code.Abi)
+		services.ABIService.StoreABI(remove0x(v.Address), *code.Abi)
 		// Save the contract code
-		stateService := services.GetStateService()
-		stateService.StoreCode(remove0x(v.Address), code.Bytecode)
+		services.StateService.StoreCode(remove0x(v.Address), code.Bytecode)
+	}
+}
+
+func (s *Synchronizer) updateContractStorage(update StateDiff, blockNumber string) {
+	bn, err := strconv.Atoi(blockNumber)
+	if err != nil {
+		panic(any(err))
+	}
+	for contractAddress, diffs := range update.StorageDiffs {
+		storage := state.ContractStorage{}
+		for _, diff := range diffs {
+			storage[remove0x(diff.Key)] = remove0x(diff.Value)
+		}
+		services.StateService.UpdateStorage(remove0x(contractAddress), uint64(bn), storage)
 	}
 }
 

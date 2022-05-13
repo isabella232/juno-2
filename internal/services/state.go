@@ -7,76 +7,115 @@ import (
 	"github.com/NethermindEth/juno/pkg/db"
 	"github.com/NethermindEth/juno/pkg/db/state"
 	"go.uber.org/zap"
+	"sync"
 )
 
-var (
-	stateService StateService
-)
+// StateService is the service to store and search all the information related with the state,
+// that is contract code and contract storage
+var StateService stateService
 
-type StateService struct {
-	started          bool
-	storeCodeChannel chan storeCodeInstruction
-	manager          *state.Manager
-	logger           *zap.SugaredLogger
+type stateService struct {
+	running bool
+	manager *state.Manager
+	logger  *zap.SugaredLogger
+	wg      sync.WaitGroup
 }
 
-func NewStateService() *StateService {
-	codeDatabase := db.Databaser(db.NewKeyValueDb(config.Runtime.DbPath+"/code", 0))
+// Run starts the service. After this the service is ready to store and search the information.
+func (service *stateService) Run() error {
+	// Init service logger
+	service.logger = log.Default.Named(log.NameSlot("State service"))
+
+	// Check if the service is already running
+	if service.running {
+		service.logger.Warn("Service is already running")
+		return nil
+	}
+	// Init the databases
+	codeDatabase := db.NewKeyValueDb(config.Runtime.DbPath+"/code", 0)
 	storageDatabase := db.NewBlockSpecificDatabase(db.NewKeyValueDb(config.Runtime.DbPath+"/storage", 0))
-	storeCodeChannel := make(chan storeCodeInstruction, 100)
-	stateService = StateService{
-		started:          false,
-		storeCodeChannel: storeCodeChannel,
-		manager:          state.NewStateManager(codeDatabase, *storageDatabase),
-		logger:           log.Default.Named("Contract Code Service"),
-	}
-	return &stateService
+	service.manager = state.NewStateManager(codeDatabase, *storageDatabase)
+
+	// Set service as running
+	service.running = true
+
+	service.logger.Info("Service running")
+	return nil
 }
 
-func (service *StateService) Run() error {
-	service.started = true
-	service.logger.Info("Service started")
-	for {
-		// TODO: Check if the channel is closed
-		select {
-		case storeInst := <-service.storeCodeChannel:
-			service.logger.
-				With("Contract address", storeInst.ContractAddress).
-				Info("Fetching contract code from contract address")
-			service.manager.PutCode(storeInst.ContractAddress, &storeInst.Code)
-			service.logger.
-				With("Contract address", storeInst.ContractAddress).
-				Info("Contract code saved")
-		}
+// Close closes the service.
+func (service *stateService) Close(_ context.Context) {
+	// Check if the service is running
+	if !service.running {
+		service.logger.Warn("Service is not running")
+		return
 	}
-}
 
-func (service *StateService) Close(ctx context.Context) {
 	service.logger.Info("Closing service...")
-	close(service.storeCodeChannel)
+	service.running = false
+	service.logger.Info("Waiting to finish current requests...")
+	service.wg.Wait()
+	// TODO: Close the database manager
 	service.logger.Info("Closed")
 }
 
-type storeCodeInstruction struct {
-	ContractAddress string
-	Code            state.ContractCode
+// StoreCode stores the contract code.
+func (service *stateService) StoreCode(contractAddress string, code state.ContractCode) {
+	service.wg.Add(1)
+	defer service.wg.Done()
+
+	service.logger.With("Contract address", contractAddress).Debug("StoreCode")
+
+	service.manager.PutCode(contractAddress, &code)
 }
 
-func (service *StateService) StoreCode(contractAddress string, code state.ContractCode) {
-	service.storeCodeChannel <- storeCodeInstruction{
-		ContractAddress: contractAddress,
-		Code:            code,
+// GetCode search the contract code for the given contract address.
+func (service *stateService) GetCode(contractAddress string) *state.ContractCode {
+	service.wg.Add(1)
+	defer service.wg.Done()
+
+	service.logger.With("Contract address", contractAddress).Debug("GetCode")
+
+	code := service.manager.GetCode(contractAddress)
+
+	return code
+}
+
+// StoreStorage stores the contract storage at the given block. Notice: this does not update the storage, if you want
+// to update the previous storage, then use the Update method.
+func (service *stateService) StoreStorage(contractAddress string, blockNumber uint64, storage state.ContractStorage) {
+	service.wg.Add(1)
+	defer service.wg.Done()
+
+	service.logger.With("Contract address", contractAddress, "Block number", blockNumber).Debug("StoreStorage")
+
+	service.manager.PutStorage(contractAddress, blockNumber, &storage)
+}
+
+// GetStorage search the updated contract storage for the given contract address and block number.
+func (service *stateService) GetStorage(contractAddress string, blockNumber uint64) *state.ContractStorage {
+	service.wg.Add(1)
+	defer service.wg.Done()
+
+	service.logger.With("Contract address", contractAddress, "Block number", blockNumber).Debug("GetStorage")
+
+	storage := service.manager.GetStorage(contractAddress, blockNumber)
+
+	return storage
+}
+
+// UpdateStorage updates the storage for the given contract address at the given block number.
+func (service *stateService) UpdateStorage(contractAddress string, blockNumber uint64, storage state.ContractStorage) {
+	service.wg.Add(1)
+	defer service.wg.Done()
+
+	service.logger.With("Contract address", contractAddress, "Block number", blockNumber).Debug("UpdateStorage")
+
+	oldStorage := service.manager.GetStorage(contractAddress, blockNumber)
+	if oldStorage == nil {
+		service.manager.PutStorage(contractAddress, blockNumber, &storage)
+	} else {
+		oldStorage.Update(storage)
+		service.manager.PutStorage(contractAddress, blockNumber, oldStorage)
 	}
-}
-
-func (service *StateService) GetCode(contractAddress string) *state.ContractCode {
-	contractCode := service.manager.GetCode(contractAddress)
-	return contractCode
-}
-
-func GetStateService() *StateService {
-	if stateService.started {
-		return &stateService
-	}
-	return nil
 }

@@ -35,6 +35,12 @@ func (s *ContractStorage) Unmarshal(data []byte) error {
 	return nil
 }
 
+func (s ContractStorage) Update(other ContractStorage) {
+	for key, value := range other {
+		s[key] = value
+	}
+}
+
 // GetStorage returns the ContractStorage state of the given contract address and block number.
 // If no exists a version for exactly the given block number, then returns the newest version
 // lower than the given block number. If the contract storage does not exists then returns nil.

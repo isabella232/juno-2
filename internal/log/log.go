@@ -2,6 +2,7 @@
 package log
 
 import (
+	"fmt"
 	"log"
 
 	"go.uber.org/zap"
@@ -18,4 +19,9 @@ func init() {
 		log.Fatalln("failed to initialise application logger")
 	}
 	Default = logger.Sugar()
+}
+
+// NameSlot represents a space for the Named slot in the log line.
+func NameSlot(name string) string {
+	return fmt.Sprintf("%-20s", name)
 }

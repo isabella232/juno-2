@@ -7,70 +7,70 @@ import (
 	"github.com/NethermindEth/juno/pkg/db"
 	"github.com/NethermindEth/juno/pkg/db/abi"
 	"go.uber.org/zap"
+	"sync"
 )
 
-var (
-	abiService ABIService
-)
+// ABIService is the ABI lookup and storage service for contracts.
+// This service is unique for the entire application. To start the service, call the Run method.
+var ABIService abiService
 
-type ABIService struct {
-	started      bool
-	storeChannel chan storeInstruction
-	db           *abi.Manager
-	logger       *zap.SugaredLogger
+type abiService struct {
+	running bool
+	manager *abi.Manager
+	logger  *zap.SugaredLogger
+	wg      sync.WaitGroup
 }
 
-func NewABIService() *ABIService {
-	database := db.Databaser(db.NewKeyValueDb(config.Runtime.DbPath+"/abi", 0))
-	storeChannel := make(chan storeInstruction, 100)
-	abiService = ABIService{
-		started:      false,
-		storeChannel: storeChannel,
-		db:           abi.NewABIManager(database),
-		logger:       log.Default.Named("ABI service"),
+// Run starts the service. After this, the service is ready to save and search ABI.
+func (service *abiService) Run() error {
+	// Check if the service is already running
+	if service.running {
+		service.logger.Warn("Service is already running")
+		return nil
 	}
-	return &abiService
+	// Init the database
+	database := db.NewKeyValueDb(config.Runtime.DbPath+"/abi", 0)
+	service.manager = abi.NewABIManager(database)
+
+	service.logger = log.Default.Named(log.NameSlot("ABI service"))
+	// Set service as running
+	service.running = true
+	service.logger.Info("service started")
+	return nil
 }
 
-func (service *ABIService) Run() error {
-	service.started = true
-	for {
-		// TODO: Check if the channel is closed
-		select {
-		case storeInst := <-service.storeChannel:
-			service.logger.
-				With("Contract address", storeInst.ContractAddress).
-				Info("Fetching ABI from contract address")
-			service.db.PutABI(storeInst.ContractAddress, storeInst.Abi)
-		}
+// Close closes the service.
+func (service *abiService) Close(_ context.Context) {
+	if !service.running {
+		service.logger.Warn("Service is not running")
+		return
 	}
-}
 
-func (service *ABIService) Close(ctx context.Context) {
 	service.logger.Info("Closing service...")
-	close(service.storeChannel)
+	service.running = false
+	service.logger.Info("Waiting to finish current requests...")
+	service.wg.Wait()
+	// TODO: Close the database manager
 	service.logger.Info("Closed")
 }
 
-type storeInstruction struct {
-	ContractAddress string
-	Abi             *abi.Abi
+// StoreABI stores the ABI in the database. If any error occurs then panic.
+func (service *abiService) StoreABI(contractAddress string, abi abi.Abi) {
+	service.wg.Add(1)
+	defer service.wg.Done()
+
+	service.logger.With("Contract address", contractAddress).Debug("StoreABI")
+
+	service.manager.PutABI(contractAddress, &abi)
 }
 
-func (service *ABIService) StoreABI(contractAddress string, abi abi.Abi) {
-	service.storeChannel <- storeInstruction{
-		ContractAddress: contractAddress,
-		Abi:             &abi,
-	}
-}
+// GetABI searches for the ABI associated with the given contract address.
+// If the ABI is not found, then it returns nil. If any error happens then panic.
+func (service *abiService) GetABI(contractAddress string) *abi.Abi {
+	service.wg.Add(1)
+	defer service.wg.Done()
 
-func (service *ABIService) GetABI(contractAddress string) (*abi.Abi, error) {
-	return service.db.GetABI(contractAddress), nil
-}
+	service.logger.With("Contract address", contractAddress).Debug("GetABI")
 
-func GetABIService() *ABIService {
-	if abiService.started {
-		return &abiService
-	}
-	return nil
+	return service.manager.GetABI(contractAddress)
 }
