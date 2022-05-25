@@ -49,6 +49,9 @@ type FunctionCall struct {
 // BlockHash Is a field element of 251 bits. Represented as up to 64 hex digits
 type BlockHash string
 
+// TransactionHash Is a field element of 251 bits. Represented as up to 64 hex digits
+type TransactionHash string
+
 // BlockTag Is a tag specifying a dynamic reference to a block
 type BlockTag string
 
@@ -215,7 +218,15 @@ type ResponseError struct {
 	Message string `json:"message"`
 }
 
-type Transactions struct{}
+type Transaction struct {
+	TransactionHash    string   `json:"txn_hash,omitempty"`
+	ContractAddress    string   `json:"contract_address,omitempty"`
+	EntryPointSelector string   `json:"entry_point_selector,omitempty"`
+	Calldata           []string `json:"calldata"`
+	Signature          []string `json:"signature"`
+	Nonce              string   `json:"nonce,omitempty"`
+	Type               string   `json:"type,omitempty"`
+}
 
 type BlockResponse struct {
 	// A field element of 251 bits. Represented as up to 64 hex digits
@@ -235,7 +246,7 @@ type BlockResponse struct {
 	// When the block was accepted on L1. Formatted as...
 	AcceptedTime uint64 `json:"accepted_time"`
 	// Transactions in the Block
-	Transactions []Transactions `json:"transactions"`
+	Transactions []Transaction `json:"transactions"`
 }
 
 type RequestedScope string
